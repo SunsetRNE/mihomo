@@ -49,7 +49,7 @@ func readTCPStats(rawConn syscall.RawConn) *Stats {
 			0,
 		)
 	})
-	if ctrlErr != nil {
+	if ctrlErr != nil || bytesReturned < uint32(unsafe.Sizeof(info)) {
 		return nil
 	}
 	return &Stats{
