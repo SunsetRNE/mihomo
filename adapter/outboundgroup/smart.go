@@ -1784,21 +1784,68 @@ func (s *Smart) checkHostStatus() {
 		return
 	}
 
+	type checkItem struct {
+		wildcardTarget string
+		nodeName       string
+		host           string
+	}
+
+	var items []checkItem
 	for wildcardTarget, nodeMap := range toCheck {
 		for nodeName, host := range nodeMap {
-			p, ok := proxyMap[nodeName]
-			if !ok {
-				continue
-			}
-			status, okRes, err := s.StatusTest(p, host)
-			if err == nil && okRes {
-				s.store.UpdateHostStatus(s.Name(), s.configName, wildcardTarget, &C.Metadata{Host: host}, nodeName, s.maxFailedTimes, s.hostFailLimit, false, true, 0)
-				log.Debugln("[Smart] Recover Group: [%s] - Node: [%s] for Host: [%s] with HTTP Status: [%d]", s.Name(), nodeName, host, status)
-			} else if err == nil {
-				log.Debugln("[Smart] Recover Group: [%s] - Node: [%s] for Host: [%s] still abnormal with HTTP Status: [%d]", s.Name(), nodeName, host, status)
-			}
+			items = append(items, checkItem{wildcardTarget, nodeName, host})
 		}
 	}
+
+	var toProbe []checkItem
+	for _, it := range items {
+		if rand.Float64() < 0.5 {
+			toProbe = append(toProbe, it)
+		}
+	}
+	if len(toProbe) == 0 {
+		return
+	}
+
+	jobs := make(chan checkItem)
+	var wg sync.WaitGroup
+	for i := 0; i < parallelDials; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range jobs {
+				select {
+				case <-s.ctx.Done():
+					return
+				default:
+				}
+				p, ok := proxyMap[it.nodeName]
+				if !ok {
+					continue
+				}
+				status, okRes, err := s.StatusTest(p, it.host)
+				metadata := &C.Metadata{Host: it.host}
+				if err == nil && okRes {
+					s.store.UpdateHostStatus(s.Name(), s.configName, it.wildcardTarget, metadata, it.nodeName, s.maxFailedTimes, s.hostFailLimit, false, true, 0)
+					log.Debugln("[Smart] Recover Group: [%s] - Node: [%s] for Host: [%s] with HTTP Status: [%d]", s.Name(), it.nodeName, it.host, status)
+				} else if err == nil {
+					s.store.UpdateHostStatus(s.Name(), s.configName, it.wildcardTarget, metadata, it.nodeName, s.maxFailedTimes, s.hostFailLimit, true, true, 2)
+					log.Debugln("[Smart] Recover Group: [%s] - Node: [%s] for Host: [%s] still abnormal with HTTP Status: [%d]", s.Name(), it.nodeName, it.host, status)
+				}
+			}
+		}()
+	}
+
+sendLoop:
+	for _, it := range toProbe {
+		select {
+		case jobs <- it:
+		case <-s.ctx.Done():
+			break sendLoop
+		}
+	}
+	close(jobs)
+	wg.Wait()
 }
 
 func (s *Smart) StatusTest(proxy C.Proxy, host string) (uint16, bool, error) {
