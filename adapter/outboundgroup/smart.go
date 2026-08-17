@@ -1031,7 +1031,7 @@ func (s *Smart) cleanupOrphanedNodeCache() {
 			log.Debugln("[Smart] Cleaning up cache data for non-existent node [%s]", node)
 		}
 
-		err := s.store.RemoveNodesData(s.Name(), s.configName, orphanedNodes)
+		err := s.store.RemoveNodesData(s.Name(), s.configName, s.hostFailLimit, orphanedNodes)
 		if err != nil {
 			log.Warnln("[Smart] Failed to clean up non-existent node caches: %v", err)
 		}
@@ -1779,7 +1779,7 @@ func (s *Smart) checkHostStatus() {
 		proxyMap[p.Name()] = p
 	}
 
-	toCheck, err := s.store.CheckHostStatus(s.Name(), s.configName)
+	toCheck, err := s.store.CheckHostStatus(s.Name(), s.configName, s.hostFailLimit)
 	if err != nil {
 		return
 	}
